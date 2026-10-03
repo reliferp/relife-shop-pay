@@ -66,9 +66,12 @@ module.exports = async (req, res) => {
     });
 
     // The URL the GAME opens in its NUI window = our embedded pay page carrying the
-    // session client_secret. Built from this deployment's own host so it always works.
+    // session client_secret. The client_secret contains base64 chars (/, +, =) that
+    // get mangled when passed through a URL query, so we base64url-encode it here
+    // (only A-Z a-z 0-9 _ -) and decode it back in /api/pay. URL-safe, lossless.
     const selfBase = 'https://' + req.headers.host;
-    const payUrl = selfBase + '/api/pay?cs=' + encodeURIComponent(session.client_secret);
+    const csParam = Buffer.from(session.client_secret, 'utf8').toString('base64url');
+    const payUrl = selfBase + '/api/pay?cs=' + csParam;
 
     return res.status(200).json({ url: payUrl, sessionId: session.id });
   } catch (e) {
