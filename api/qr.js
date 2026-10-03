@@ -8,8 +8,9 @@ const QRCode = require('qrcode');
 module.exports = async (req, res) => {
   try {
     const u = String((req.query && req.query.u) || '');
-    // only ever encode a Stripe hosted checkout URL
-    if (!/^https:\/\/checkout\.stripe\.com\/[A-Za-z0-9/_%+=.\-?&]+$/.test(u) || u.length > 2048) {
+    // only ever encode a Stripe hosted checkout URL (these contain # fragments and
+    // many url chars; we just need a non-whitespace string under the host).
+    if (!/^https:\/\/checkout\.stripe\.com\/\S{1,2000}$/.test(u)) {
       return res.status(400).json({ error: 'bad_url' });
     }
     const png = await QRCode.toBuffer(u, {
