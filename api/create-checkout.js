@@ -1,11 +1,10 @@
-// ReLife Stripe backend — create a PaymentIntent (lightweight in-game card form).
+// ReLife Stripe backend — create a HOSTED Checkout Session.
 // Deploy on Vercel. Stripe keys live ONLY in Vercel env vars.
 // Called by FiveM (relife-pm) over HTTPS with Authorization: Bearer <SHARED_TOKEN>.
 //
-// We use a PaymentIntent + Stripe Card Element (ONE iframe) instead of Embedded
-// Checkout (dozens of iframes) because the heavy Embedded Checkout crashed FiveM's
-// CEF. The game opens /api/pay (Card Element) in its NUI window; crediting still
-// happens server-side in FiveM after /verify confirms the PaymentIntent succeeded.
+// The player opens session.url in their REAL browser (via QR on phone, or the
+// "open browser" button on PC). FiveM's CEF cannot render Stripe (it crashes), so
+// card entry happens in a real browser. The game polls /verify and credits RLC.
 
 const Stripe = require('stripe');
 
@@ -46,23 +45,26 @@ module.exports = async (req, res) => {
 
     const stripe = Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
-    // Card-only PaymentIntent. Amount is server-side (never from the client/game).
-    const pi = await stripe.paymentIntents.create({
-      amount: pkg.eurCents,
-      currency: 'eur',
+    const base = process.env.PUBLIC_BASE_URL || 'https://reliferp.com';
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
       payment_method_types: ['card'],
-      description: `${pkg.rlc} RLC - ReLife Romania`,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'eur',
+          unit_amount: pkg.eurCents,
+          product_data: { name: `${pkg.rlc} RLC - ReLife Romania` },
+        },
+      }],
+      client_reference_id: intent,
       metadata: { intent, packageId, rlc: String(pkg.rlc) },
+      success_url: `${base}/?rlc=success`,
+      cancel_url: `${base}/?rlc=cancel`,
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 min
     });
 
-    // The URL the GAME opens in its NUI window = our light card page carrying the
-    // PaymentIntent client_secret (base64url-encoded so it survives the URL query).
-    const selfBase = 'https://' + req.headers.host;
-    const csParam = Buffer.from(pi.client_secret, 'utf8').toString('base64url');
-    const payUrl = selfBase + '/api/pay?cs=' + csParam;
-
-    // sessionId carries the PaymentIntent id; the game stores it and polls /verify.
-    return res.status(200).json({ url: payUrl, sessionId: pi.id });
+    return res.status(200).json({ url: session.url, sessionId: session.id });
   } catch (e) {
     console.error('create-checkout error', e && e.message);
     return res.status(500).json({ error: 'server' });
