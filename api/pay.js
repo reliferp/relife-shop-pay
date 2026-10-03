@@ -12,7 +12,10 @@ module.exports = (req, res) => {
   // allow being framed by the game NUI
   res.setHeader('X-Frame-Options', 'ALLOWALL');
 
-  if (!/^cs_[A-Za-z0-9_]+$/.test(cs)) {
+  // client_secret for Embedded Checkout contains base64url+ chars (/, +, =, -).
+  // Validate the shape without over-restricting; it is only ever injected via
+  // JSON.stringify into a <script>, so HTML/JS-breaking chars are what we block.
+  if (!/^cs_[A-Za-z0-9_\-+/=]{8,4000}$/.test(cs)) {
     return res.status(400).send(page('<h1>Sesiune invalida</h1><p>Reia cumpararea din meniul ESC.</p>'));
   }
   if (!/^pk_(live|test)_[A-Za-z0-9]+$/.test(pk)) {
