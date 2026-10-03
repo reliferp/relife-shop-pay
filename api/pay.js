@@ -4,7 +4,7 @@
 // No secret key here; crediting still happens server-side in FiveM after /verify.
 
 module.exports = (req, res) => {
-  const cs = String((req.query && req.query.cs) || '');
+  const csParam = String((req.query && req.query.cs) || '');
   const pk = process.env.STRIPE_PUBLISHABLE_KEY || '';
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -12,10 +12,14 @@ module.exports = (req, res) => {
   // allow being framed by the game NUI
   res.setHeader('X-Frame-Options', 'ALLOWALL');
 
-  // client_secret for Embedded Checkout contains base64url+ chars (/, +, =, -).
-  // Validate the shape without over-restricting; it is only ever injected via
-  // JSON.stringify into a <script>, so HTML/JS-breaking chars are what we block.
-  if (!/^cs_[A-Za-z0-9_\-+/=]{8,4000}$/.test(cs)) {
+  // cs is the base64url-encoded Stripe client_secret (see create-checkout.js).
+  // Only A-Z a-z 0-9 _ - survive a URL query cleanly; decode back to the real secret.
+  if (!/^[A-Za-z0-9_-]{8,8000}$/.test(csParam)) {
+    return res.status(400).send(page('<h1>Sesiune invalida</h1><p>Reia cumpararea din meniul ESC.</p>'));
+  }
+  let cs = '';
+  try { cs = Buffer.from(csParam, 'base64url').toString('utf8'); } catch (e) { cs = ''; }
+  if (cs.indexOf('cs_') !== 0 || cs.length > 4000) {
     return res.status(400).send(page('<h1>Sesiune invalida</h1><p>Reia cumpararea din meniul ESC.</p>'));
   }
   if (!/^pk_(live|test)_[A-Za-z0-9]+$/.test(pk)) {
