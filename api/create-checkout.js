@@ -1,5 +1,5 @@
-// ReLife Stripe backend — create Checkout Session
-// Deploy on Vercel at shop.reliferp.com. Stripe keys live ONLY in Vercel env vars.
+// ReLife Stripe backend — create Checkout Session (EMBEDDED, pay inside the game)
+// Deploy on Vercel. Stripe keys live ONLY in Vercel env vars.
 // Called by FiveM (relife-pm) over HTTPS with Authorization: Bearer <SHARED_TOKEN>.
 
 const Stripe = require('stripe');
@@ -36,34 +36,41 @@ module.exports = async (req, res) => {
     const body = typeof req.body === 'object' && req.body ? req.body : JSON.parse(req.body || '{}');
     const intent = String(body.intent || '');
     const packageId = String(body.packageId || '');
-    // intent is a 32-hex token minted by the game; reject anything else
+    // intent is a hex token minted by the game; reject anything else
     if (!/^[a-f0-9]{16,64}$/i.test(intent)) return res.status(400).json({ error: 'bad_intent' });
     const pkg = PACKAGES[packageId];
     if (!pkg) return res.status(400).json({ error: 'bad_package' });
 
     const stripe = Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
-    const base = process.env.PUBLIC_BASE_URL || 'https://reliferp.com';
+    // EMBEDDED mode: no redirect, the card form is mounted inside our /api/pay page,
+    // which is loaded inside the game's NUI window. redirect_on_completion:'never'
+    // keeps everything on-page; onComplete (client side) tells the game it's done.
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      ui_mode: 'embedded',
+      redirect_on_completion: 'never',
       payment_method_types: ['card'],
       line_items: [{
         quantity: 1,
         price_data: {
           currency: 'eur',
           unit_amount: pkg.eurCents,
-          product_data: { name: `${pkg.rlc} RLC — ReLife Romania` },
+          product_data: { name: `${pkg.rlc} RLC - ReLife Romania` },
         },
       }],
       // metadata/reference carry our intent so /verify can confirm later
       client_reference_id: intent,
       metadata: { intent, packageId, rlc: String(pkg.rlc) },
-      success_url: `${base}/?rlc=success`,
-      cancel_url: `${base}/?rlc=cancel`,
       expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 min
     });
 
-    return res.status(200).json({ url: session.url, sessionId: session.id });
+    // The URL the GAME opens in its NUI window = our embedded pay page carrying the
+    // session client_secret. Built from this deployment's own host so it always works.
+    const selfBase = 'https://' + req.headers.host;
+    const payUrl = selfBase + '/api/pay?cs=' + encodeURIComponent(session.client_secret);
+
+    return res.status(200).json({ url: payUrl, sessionId: session.id });
   } catch (e) {
     console.error('create-checkout error', e && e.message);
     return res.status(500).json({ error: 'server' });
